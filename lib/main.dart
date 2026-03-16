@@ -1,5 +1,5 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+
 import 'home_page.dart'; // Import the HomePage widget
 
 void main() {
@@ -13,7 +13,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Friends Bingo House',
+      title: 'Geez Bingo House',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
@@ -32,7 +32,7 @@ class SplashScreen extends StatelessWidget {
     Future.delayed(const Duration(seconds: 3), () {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => HomePage()),
+        MaterialPageRoute(builder: (context) => const HomePage()),
       );
     });
 
@@ -43,7 +43,7 @@ class SplashScreen extends StatelessWidget {
           // Background image
           Positioned.fill(
             child: Image.asset(
-              'assets/logo.webp',
+              'assets/images/background.jpg',
               fit: BoxFit.cover,
             ),
           ),
@@ -54,7 +54,7 @@ class SplashScreen extends StatelessWidget {
               Padding(
                 padding: EdgeInsets.only(top: 50.0), // Add top padding
                 child: Text(
-                  'Friends Bingo House',
+                  'Geez Bingo House',
                   style: TextStyle(
                     fontSize: 36,
                     fontWeight: FontWeight.bold,

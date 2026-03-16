@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class HomePage extends StatefulWidget {
@@ -12,11 +13,15 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   Map<String, Map<String, List<dynamic>>> cartelas =
       {}; // Holds cartelas by unique numbers
-  final String appName = "Friends Bingo";
+  final String appName = "Geez Bingo";
   bool isAutoRotate = true; // Track orientation state
   TextEditingController searchController =
       TextEditingController(); // Single search controller
   String searchAlert = ""; // Alert text for search result
+  String lastClickedNumber = ""; // Track the last clicked cell value
+  bool lastActionWasAdded = true; // Track if last action was add or remove
+  bool useLineCounting = false; // Toggle between sorting algorithms
+  bool sortingDisabled = false; // Toggle to disable sorting completely
 
   Future<void> fetchCartela(String cartelaNumber) async {
     try {
@@ -82,27 +87,83 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // Restore all cartelas
+  // Restore all cartelas with confirmation
   void restoreCartelas() {
-    setState(() {
-      cartelas.clear(); // Clear all added cartelas
-      searchAlert = "All Cartelas removed."; // Show message
-    });
+    if (cartelas.isEmpty) {
+      setState(() {
+        searchAlert = "No cartelas to restore.";
+      });
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Restore'),
+        content: Text(
+            'Are you sure you want to restore all ${cartelas.length} cartelas?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                cartelas.clear(); // Clear all added cartelas
+                searchAlert = "All Cartelas restored."; // Show message
+              });
+            },
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
   }
 
-  // Reset marked numbers for all cartelas
+  // Reset marked numbers for all cartelas with confirmation
   void resetMarkedNumbers() {
-    setState(() {
-      cartelas.forEach((key, cartela) {
-        cartela['marked'] =
-            List<bool>.generate(25, (index) => false); // Reset marked numbers
+    if (cartelas.isEmpty) {
+      setState(() {
+        searchAlert = "No cartelas to reset.";
       });
-      searchAlert = "All marked numbers have been reset."; // Show message
-    });
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Reset'),
+        content:
+            const Text('Are you sure you want to reset all marked numbers?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                cartelas.forEach((key, cartela) {
+                  cartela['marked'] = List<bool>.generate(
+                      25, (index) => false); // Reset marked numbers
+                });
+                searchAlert =
+                    "All marked numbers have been reset."; // Show message
+              });
+            },
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
   }
 
   // Mark/Unmark the same number across all cartelas
-  void markNumberAcrossAllCartelas(String column, String value, bool newMarkedState) {
+  void markNumberAcrossAllCartelas(
+      String column, String value, bool newMarkedState) {
     setState(() {
       cartelas.forEach((cartelaNumber, cartela) {
         // Get the list for this column (B, I, N, G, or O)
@@ -120,43 +181,201 @@ class _HomePageState extends State<HomePage> {
           }
         }
       });
-      
+
       // After marking, sort cartelas by marked count (most marked first)
       sortCartelasByMarkedCount();
     });
   }
 
+  // Count completed bingo lines (rows, columns, diagonals, four corners)
+  int countCompletedLines(Map<String, List<dynamic>> cartela) {
+    int lines = 0;
+    List<bool> marked = List<bool>.from(cartela['marked']!);
+
+    // Helper function to check if a cell is effectively marked
+    bool isEffectivelyMarked(int index) {
+      // FREE space at N[2] (index 12) is always considered marked
+      if (index == 12) return true;
+      return marked[index];
+    }
+
+    // Check rows (5 possible)
+    for (int row = 0; row < 5; row++) {
+      bool rowComplete = true;
+      for (int col = 0; col < 5; col++) {
+        int index = row * 5 + col;
+        if (!isEffectivelyMarked(index)) {
+          rowComplete = false;
+          break;
+        }
+      }
+      if (rowComplete) lines++;
+    }
+
+    // Check columns (5 possible)
+    for (int col = 0; col < 5; col++) {
+      bool colComplete = true;
+      for (int row = 0; row < 5; row++) {
+        int index = row * 5 + col;
+        if (!isEffectivelyMarked(index)) {
+          colComplete = false;
+          break;
+        }
+      }
+      if (colComplete) lines++;
+    }
+
+    // Check main diagonal (top-left to bottom-right)
+    bool mainDiagComplete = true;
+    for (int i = 0; i < 5; i++) {
+      int index = i * 5 + i;
+      if (!isEffectivelyMarked(index)) {
+        mainDiagComplete = false;
+        break;
+      }
+    }
+    if (mainDiagComplete) lines++;
+
+    // Check anti-diagonal (top-right to bottom-left)
+    bool antiDiagComplete = true;
+    for (int i = 0; i < 5; i++) {
+      int index = i * 5 + (4 - i);
+      if (!isEffectivelyMarked(index)) {
+        antiDiagComplete = false;
+        break;
+      }
+    }
+    if (antiDiagComplete) lines++;
+
+    // Check four corners (B[0], B[4], O[0], O[4]) - unchanged as it doesn't include FREE space
+    if (marked[0] && marked[4] && marked[20] && marked[24]) {
+      lines++;
+    }
+
+    return lines;
+  }
+
+  // Show settings dialog
+  void _showSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Settings'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Sort toggle switch
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Sort Cards',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Switch(
+                    value: !sortingDisabled,
+                    onChanged: (value) {
+                      setState(() {
+                        sortingDisabled = !value;
+                      });
+                      setDialogState(
+                          () {}); // Rebuild dialog to show toggle change
+                      // Trigger resorting immediately when toggle changes
+                      if (!sortingDisabled) {
+                        sortCartelasByMarkedCount();
+                      }
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Algorithm selection (only show when sorting is enabled)
+              if (!sortingDisabled) ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<bool>(
+                  initialValue: useLineCounting,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: false,
+                      child: Text('ብ በዝሒ ዝተፀወዐ'),
+                    ),
+                    DropdownMenuItem(
+                      value: true,
+                      child: Text('ብ በዝሒ መስመር'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    setState(() {
+                      useLineCounting = value!;
+                    });
+                    setDialogState(
+                        () {}); // Rebuild dialog to show dropdown change
+                    // Trigger resorting immediately when algorithm changes
+                    sortCartelasByMarkedCount();
+                  },
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // Move only the card with most marks to first position
   void sortCartelasByMarkedCount() {
-    if (cartelas.length <= 1) return; // No need to sort if 0 or 1 card
-    
-    // Find the card with the maximum marked count
+    if (sortingDisabled || cartelas.length <= 1)
+      return; // No sorting if disabled or 0/1 card
+
+    // Find the card with the maximum count (marked cells or completed lines)
     String? maxCartelaKey;
-    int maxMarkedCount = 0;
-    
+    int maxCount = 0;
+
     cartelas.forEach((key, value) {
-      int count = (value['marked'] as List<bool>).where((marked) => marked).length;
-      if (count > maxMarkedCount) {
-        maxMarkedCount = count;
+      int count;
+      if (useLineCounting) {
+        count = countCompletedLines(value);
+      } else {
+        count =
+            (value['marked'] as List<bool>).where((marked) => marked).length;
+      }
+
+      if (count > maxCount) {
+        maxCount = count;
         maxCartelaKey = key;
       }
     });
-    
+
     // If we found a max card and it's not already first
     if (maxCartelaKey != null && cartelas.keys.first != maxCartelaKey) {
       // Get all entries
       var entries = cartelas.entries.toList();
-      
+
       // Find the index of the max card
       int maxIndex = entries.indexWhere((entry) => entry.key == maxCartelaKey);
-      
+
       if (maxIndex > 0) {
         // Remove the max card from its position
         var maxEntry = entries.removeAt(maxIndex);
-        
+
         // Insert it at the beginning
         entries.insert(0, maxEntry);
-        
+
         // Rebuild the map with new order
         cartelas = Map.fromEntries(entries);
       }
@@ -165,15 +384,18 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // Get screen width for responsive design
+    // Get screen dimensions for responsive design
     double screenWidth = MediaQuery.of(context).size.width;
-    
+    bool isInLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
     // Responsive sizing
     double logoSize = screenWidth < 360 ? 28 : (screenWidth < 400 ? 32 : 36);
-    double titleFontSize = screenWidth < 360 ? 14 : (screenWidth < 400 ? 16 : 18);
+    double titleFontSize =
+        screenWidth < 360 ? 14 : (screenWidth < 400 ? 16 : 18);
     double iconSize = screenWidth < 360 ? 20 : 22;
     double appBarHeight = screenWidth < 360 ? 50 : 56;
-    
+
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(appBarHeight),
@@ -201,22 +423,6 @@ class _HomePageState extends State<HomePage> {
           ),
           backgroundColor: Colors.deepPurple,
           actions: [
-            // Rotation icon
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: GestureDetector(
-                onTap: toggleOrientation,
-                child: AnimatedRotation(
-                  turns: isAutoRotate ? 0 : 0.5,
-                  duration: const Duration(milliseconds: 500),
-                  child: Icon(
-                    Icons.screen_rotation,
-                    color: Colors.red,
-                    size: iconSize,
-                  ),
-                ),
-              ),
-            ),
             // Delete/Restore icon
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -229,7 +435,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-            // Refresh icony
+            // Refresh icon
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: GestureDetector(
@@ -241,11 +447,103 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
+            // 3-dot menu for settings (moved to last position)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: GestureDetector(
+                onTap: _showSettingsDialog,
+                child: Icon(
+                  Icons.more_vert,
+                  color: Colors.red,
+                  size: iconSize,
+                ),
+              ),
+            ),
           ],
         ),
       ),
       body: Column(
         children: [
+          // Top row with last clicked number and total cards
+          if (cartelas.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Left side: Total cards counter
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          offset: const Offset(2, 2),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      'Total Cards: ${cartelas.length}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: screenWidth < 360 ? 12 : 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+
+                  // Right side: Last clicked number with label
+                  if (lastClickedNumber.isNotEmpty)
+                    Row(
+                      children: [
+                        Text(
+                          lastActionWasAdded ? 'Added: ' : 'Removed: ',
+                          style: TextStyle(
+                            color:
+                                lastActionWasAdded ? Colors.black : Colors.red,
+                            fontSize: screenWidth < 360 ? 12 : 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.deepPurple,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.3),
+                                offset: const Offset(2, 2),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Text(
+                              lastClickedNumber,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: screenWidth < 360 ? 12 : 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    const SizedBox(
+                        width:
+                            110), // Placeholder for alignment (label + circle)
+                ],
+              ),
+            ),
+
           cartelas.isEmpty
               ? const Center(child: Text("No Cartelas Added"))
               : Expanded(
@@ -256,41 +554,47 @@ class _HomePageState extends State<HomePage> {
                     child: GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        crossAxisSpacing: 4,
-                        mainAxisSpacing: 6,
-                        childAspectRatio: 0.73,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: isInLandscape ? 3 : 2,
+                        crossAxisSpacing: isInLandscape ? 2 : 4,
+                        mainAxisSpacing: isInLandscape ? 3 : 6,
+                        childAspectRatio: isInLandscape ? 0.6 : 0.73,
                       ),
                       itemCount: cartelas.length,
-                       itemBuilder: (context, index) {
-                         var entry = cartelas.entries.elementAt(index);
-                         // Count marked numbers for this card
-                         int markedCount = (entry.value['marked'] as List<bool>).where((marked) => marked).length;
-                         // First place only if it's index 0 AND has at least 4 marked
-                         bool isFirstPlace = index == 0 && markedCount >= 4;
-                         
-                         return Container(
-                           margin: const EdgeInsets.all(2),
-                           decoration: BoxDecoration(
-                             border: Border.all(
-                               color: isFirstPlace ? Colors.amber : Colors.deepPurpleAccent,
-                               width: isFirstPlace ? 3 : 1,
-                             ),
-                             borderRadius: BorderRadius.circular(16),
-                             boxShadow: isFirstPlace ? [
-                               BoxShadow(
-                                 color: Colors.amber.withOpacity(0.6),
-                                 spreadRadius: 2,
-                                 blurRadius: 8,
-                                 offset: const Offset(0, 0),
-                               ),
-                             ] : null,
-                           ),
-                           child: buildCartela(entry.key, entry.value, isFirstPlace),
-                         );
-                       },
+                      itemBuilder: (context, index) {
+                        var entry = cartelas.entries.elementAt(index);
+                        // Count marked numbers for this card
+                        int markedCount = (entry.value['marked'] as List<bool>)
+                            .where((marked) => marked)
+                            .length;
+                        // First place only if it's index 0 AND has at least 4 marked
+                        bool isFirstPlace = index == 0 && markedCount >= 4;
+
+                        return Container(
+                          margin: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: isFirstPlace
+                                  ? Colors.amber
+                                  : Colors.deepPurpleAccent,
+                              width: isFirstPlace ? 3 : 1,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: isFirstPlace
+                                ? [
+                                    BoxShadow(
+                                      color: Colors.amber.withOpacity(0.6),
+                                      spreadRadius: 2,
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 0),
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: buildCartela(entry.key, entry.value,
+                              isFirstPlace, isInLandscape, screenWidth),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -299,7 +603,7 @@ class _HomePageState extends State<HomePage> {
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddCartelaDialog,
         backgroundColor: Colors.deepPurple,
-        child: Icon(Icons.add),
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -365,7 +669,7 @@ class _HomePageState extends State<HomePage> {
                         minimumSize: Size(
                             screenWidth * 0.45, 36), // Even smaller button size
                       ),
-                      child: Text("ADD"),
+                      child: const Text("ADD"),
                     ),
                     const SizedBox(height: 8),
                     // Alert for search result
@@ -400,7 +704,7 @@ class _HomePageState extends State<HomePage> {
                 minimumSize:
                     const Size(80, 36), // Even smaller cancel button size
               ),
-              child: Text(
+              child: const Text(
                 "Cancel",
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
@@ -414,15 +718,22 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget buildCartela(
-      String cartelaNumber, Map<String, List<dynamic>> cartela, bool isFirstPlace) {
+  Widget buildCartela(String cartelaNumber, Map<String, List<dynamic>> cartela,
+      bool isFirstPlace, bool isInLandscape, double screenWidth) {
     bool isSingleCartela = cartelas.length == 1;
-    
+
     // Count marked numbers for display
-    int markedCount = (cartela['marked'] as List<bool>).where((marked) => marked).length;
+    int markedCount =
+        (cartela['marked'] as List<bool>).where((marked) => marked).length;
 
     return Container(
-      width: isSingleCartela ? 180 : 120,
+      width: isInLandscape
+          ? screenWidth * 0.25 // 25% of screen width in landscape
+          : (isSingleCartela ? 180 : 120), // Current portrait behavior
+      height: isInLandscape
+          ? screenWidth *
+              0.35 // Smaller height in landscape (35% of screen width)
+          : null, // Auto height in portrait (current behavior)
       margin: const EdgeInsets.all(0),
       padding: const EdgeInsets.all(0.5),
       decoration: BoxDecoration(
@@ -432,17 +743,17 @@ class _HomePageState extends State<HomePage> {
         ),
         borderRadius: BorderRadius.circular(16),
         gradient: LinearGradient(
-          colors: isFirstPlace 
-            ? [Colors.amber.shade100, Colors.amber.shade300]
-            : [Colors.deepPurple.shade100, Colors.deepPurple.shade300],
+          colors: isFirstPlace
+              ? [Colors.amber.shade100, Colors.amber.shade300]
+              : [Colors.deepPurple.shade100, Colors.deepPurple.shade300],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         boxShadow: [
           BoxShadow(
-            color: isFirstPlace 
-              ? Colors.amber.withOpacity(0.5)
-              : Colors.black.withOpacity(0.3),
+            color: isFirstPlace
+                ? Colors.amber.withOpacity(0.5)
+                : Colors.black.withOpacity(0.3),
             offset: const Offset(4, 4),
             blurRadius: 8,
           ),
@@ -463,26 +774,29 @@ class _HomePageState extends State<HomePage> {
                     color: Colors.amber,
                     size: 16,
                   ),
-                if (isFirstPlace)
-                  const SizedBox(width: 2),
+                if (isFirstPlace) const SizedBox(width: 2),
                 Expanded(
                   child: Row(
                     children: [
                       Text(
                         "NO=$cartelaNumber",
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: isInLandscape ? 11 : 13,
                           fontWeight: FontWeight.bold,
-                          color: isFirstPlace ? Colors.amber.shade900 : Colors.deepPurple,
+                          color: isFirstPlace
+                              ? Colors.amber.shade900
+                              : Colors.deepPurple,
                         ),
                       ),
                       // Show marked count
                       Text(
                         " ($markedCount)",
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: isInLandscape ? 9 : 11,
                           fontWeight: FontWeight.bold,
-                          color: isFirstPlace ? Colors.amber.shade900 : Colors.deepPurple,
+                          color: isFirstPlace
+                              ? Colors.amber.shade900
+                              : Colors.deepPurple,
                         ),
                       ),
                     ],
@@ -500,7 +814,9 @@ class _HomePageState extends State<HomePage> {
                     child: Icon(
                       Icons.delete,
                       size: 16,
-                      color: isFirstPlace ? Colors.amber.shade900 : Colors.deepPurple,
+                      color: isFirstPlace
+                          ? Colors.amber.shade900
+                          : Colors.deepPurple,
                     ),
                   ),
                 ),
@@ -518,7 +834,9 @@ class _HomePageState extends State<HomePage> {
                     child: Icon(
                       Icons.refresh,
                       size: 14,
-                      color: isFirstPlace ? Colors.amber.shade900 : Colors.deepPurple,
+                      color: isFirstPlace
+                          ? Colors.amber.shade900
+                          : Colors.deepPurple,
                     ),
                   ),
                 ),
@@ -536,9 +854,11 @@ class _HomePageState extends State<HomePage> {
                   child: Text(
                     label,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: isInLandscape ? 12 : 14,
                       fontWeight: FontWeight.bold,
-                      color: isFirstPlace ? Colors.amber.shade900 : Colors.deepPurple,
+                      color: isFirstPlace
+                          ? Colors.amber.shade900
+                          : Colors.deepPurple,
                     ),
                   ),
                 );
@@ -554,12 +874,11 @@ class _HomePageState extends State<HomePage> {
                     true, // Prevents GridView from taking up excess space
                 physics:
                     const NeverScrollableScrollPhysics(), // Disable grid scrolling
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 5,
-                  crossAxisSpacing: 4,
-                  mainAxisSpacing: 6,
-                  childAspectRatio:
-                      1, // Adjusted ratio to ensure proper sizing
+                  crossAxisSpacing: isInLandscape ? 1 : 4,
+                  mainAxisSpacing: isInLandscape ? 2 : 6,
+                  childAspectRatio: isInLandscape ? 0.9 : 1,
                 ),
                 itemCount: 25,
                 itemBuilder: (context, index) {
@@ -577,13 +896,21 @@ class _HomePageState extends State<HomePage> {
                         // Get the column letter (B, I, N, G, O)
                         int columnIndex = index % 5;
                         String column = ['B', 'I', 'N', 'G', 'O'][columnIndex];
-                        
+
                         // Get current state and toggle it
                         bool currentState = cartela['marked']?[index] ?? false;
                         bool newState = !currentState;
-                        
+
+                        // Update last clicked number and action
+                        setState(() {
+                          lastClickedNumber = cellValue;
+                          lastActionWasAdded =
+                              newState; // true if adding mark, false if removing
+                        });
+
                         // Mark/unmark this number across ALL cartelas
-                        markNumberAcrossAllCartelas(column, cellValue, newState);
+                        markNumberAcrossAllCartelas(
+                            column, cellValue, newState);
                       }
                     },
                     child: Container(
@@ -596,10 +923,10 @@ class _HomePageState extends State<HomePage> {
                       alignment: Alignment.center,
                       child: Text(
                         cellValue,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.black,
                           fontWeight: FontWeight.bold,
-                          fontSize: 17,
+                          fontSize: isInLandscape ? 14 : 17,
                         ),
                       ),
                     ),
