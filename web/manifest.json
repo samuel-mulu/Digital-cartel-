@@ -1,11 +1,11 @@
 {
-    "name": "bingo_application_1",
-    "short_name": "bingo_application_1",
+    "name": "Friends Bingo",
+    "short_name": "Friends Bingo",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#311B92",
+    "theme_color": "#311B92",
+    "description": "Friends Bingo — play bingo with friends.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -1,0 +1,36 @@
+ok lets go for the half game when "B1 I1 N1 G1 O1
+B2 I2 N2 G2 O2
+B3 I3 N3 G3 O3" 2nd "B3 I3 N3 G3 O3
+B4 I4 N4 G4 O4
+B5 I5 N5 G5 O5" 3rd"B1 I1 N1 
+B2 I2 N2 
+B3 I3 N3
+B4 I4 N4 
+B5 I5 N5 " 4th= N1 G1 O1
+ N2 G2 O2
+ N3 G3 O3
+ N4 G4 O4
+N5 G5 O5", 5th= "
+B2 I2 N2 G2 O2
+B3 I3 N3 G3 O3
+B4 I4 N4 G4 O4 " 6th= I1 N1 G1
+ I2 N2 G2 
+ I3 N3 G3 
+ I4 N4 G4
+ I5 N5 G5 // 7th=B1  
+                            B2 I2  
+                            B3 I3 N3  
+                            B4 I4 N4 G4  
+                            B5 I5 N5 G5 O5//  8th                    O1 
+                                                                             G2 O2 
+                                                                        N3 G3 O3 
+                                                                    I4 N4 G4 O4 
+                                                               B5 I5 N5 G5 O5//  9th//  B1 I1 N1 G1 O1
+                                                                                                           I2 N2 G2 O2 
+                                                                                                               N3 G3 O3 
+                                                                                                                     G4 O4 
+                                                                                                                          O5///  10th B1 I1N1G1O1 
+                                                                                                                                          B2 I2 N2 G2  
+                                                                                                                                         B3 I3 N3  
+                                                                                                                                         B4 I4  
+                                                                                                                                         B5 ////                 for this game is name half game and assume to easly to integrate and assumed to add like this by name and games 
