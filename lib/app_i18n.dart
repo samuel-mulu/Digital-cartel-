@@ -9,14 +9,14 @@ class AppI18n {
 
   static const Map<String, Map<AppLanguage, String>> _strings = {
     'app_name': {
-      AppLanguage.english: 'FRIENDS BINGO',
-      AppLanguage.amharic: 'ፍሬንድስ ቢንጎ',
-      AppLanguage.tigrinya: 'ፍረንድስ ቢንጎ',
+      AppLanguage.english: 'ግእዝ ቢንጎ',
+      AppLanguage.amharic: 'ግእዝ ቢንጎ',
+      AppLanguage.tigrinya: 'ግእዝ ቢንጎ',
     },
     'friends_bingo_house': {
-      AppLanguage.english: 'Friends Bingo House',
-      AppLanguage.amharic: 'ፍሬንድስ ቢንጎ ቤት',
-      AppLanguage.tigrinya: 'ፍሬንድስ ቢንጎ ቤት',
+      AppLanguage.english: 'ግእዝ ቢንጎ ቤት',
+      AppLanguage.amharic: 'ግእዝ ቢንጎ ቤት',
+      AppLanguage.tigrinya: 'ግእዝ ቢንጎ ቤት',
     },
     'splash_tagline': {
       AppLanguage.english: 'Play together · Win together',

@@ -15,6 +15,10 @@ class CartelaCard extends StatefulWidget {
     required this.screenWidth,
     required this.selectedGameRule,
     required this.language,
+    required this.isDarkMode,
+    required this.lineCount,
+    required this.gameResult,
+    required this.masterLocked,
     required this.onRemove,
     required this.onReset,
     required this.onCellMarkChanged,
@@ -28,6 +32,10 @@ class CartelaCard extends StatefulWidget {
   final double screenWidth;
   final GameRule selectedGameRule;
   final AppLanguage language;
+  final bool isDarkMode;
+  final int lineCount;
+  final GameResult gameResult;
+  final bool masterLocked;
   final VoidCallback onRemove;
   final VoidCallback onReset;
   final void Function(String column, String value, bool newState)
@@ -41,6 +49,7 @@ class _CartelaCardState extends State<CartelaCard>
     with SingleTickerProviderStateMixin {
   late final AnimationController _oneAwayBlinkController;
   bool _wasBingo = false;
+  bool _isLocked = false;
 
   @override
   void initState() {
@@ -60,11 +69,7 @@ class _CartelaCardState extends State<CartelaCard>
   @override
   Widget build(BuildContext context) {
     final bool isSingleCartela = widget.totalCartelas == 1;
-    final int markedCount = (widget.cartela['marked'] as List<bool>)
-        .where((marked) => marked)
-        .length;
-    final GameResult gameResult =
-        evaluateCartelaForGame(widget.cartela, widget.selectedGameRule);
+    final GameResult gameResult = widget.gameResult;
     final bool hasGameBingo = gameResult.isBingo;
     final bool isOneAway = gameResult.isOneAway;
     final bool showStatusBadge = hasGameBingo || isOneAway;
@@ -85,24 +90,18 @@ class _CartelaCardState extends State<CartelaCard>
       padding: const EdgeInsets.all(0.5),
       decoration: BoxDecoration(
         border: Border.all(
-          color: widget.isFirstPlace ? Colors.amber : Colors.deepPurpleAccent,
-          width: widget.isFirstPlace ? 3 : 2,
+          color: widget.isFirstPlace
+              ? const Color(0xFFFFD700)
+              : const Color(0xFFFFD700),
+          width: widget.isFirstPlace ? 3 : 2.5,
         ),
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          colors: widget.isFirstPlace
-              ? [Colors.amber.shade100, Colors.amber.shade300]
-              : [Colors.deepPurple.shade100, Colors.deepPurple.shade300],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        borderRadius: BorderRadius.circular(12),
+        color: widget.isDarkMode ? Colors.black : Colors.white,
         boxShadow: [
           BoxShadow(
-            color: widget.isFirstPlace
-                ? Colors.amber.withValues(alpha: 0.5)
-                : Colors.black.withValues(alpha: 0.3),
-            offset: const Offset(4, 4),
-            blurRadius: 8,
+            color: Colors.black.withValues(alpha: 0.15),
+            offset: const Offset(2, 2),
+            blurRadius: 6,
           ),
         ],
       ),
@@ -112,7 +111,7 @@ class _CartelaCardState extends State<CartelaCard>
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildHeader(markedCount),
+              _buildHeader(),
               _buildColumnLabels(),
               Expanded(
                 child: SingleChildScrollView(
@@ -194,9 +193,10 @@ class _CartelaCardState extends State<CartelaCard>
     }
   }
 
-  Widget _buildHeader(int markedCount) {
+  Widget _buildHeader() {
+    final int lineCount = widget.lineCount;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       child: Row(
         children: [
           if (widget.isFirstPlace)
@@ -210,26 +210,34 @@ class _CartelaCardState extends State<CartelaCard>
             child: Row(
               children: [
                 Text(
-                  "NO=${widget.cartelaNumber}",
+                  "ቁ: ${widget.cartelaNumber}",
                   style: TextStyle(
                     fontSize: widget.isInLandscape ? 11 : 13,
                     fontWeight: FontWeight.bold,
-                    color: widget.isFirstPlace
-                        ? Colors.amber.shade900
-                        : Colors.deepPurple,
+                    color: widget.isDarkMode ? Colors.white : Colors.black87,
                   ),
                 ),
+                const SizedBox(width: 6),
                 Text(
-                  " ($markedCount)",
+                  "መ: $lineCount",
                   style: TextStyle(
-                    fontSize: widget.isInLandscape ? 9 : 11,
+                    fontSize: widget.isInLandscape ? 10 : 13,
                     fontWeight: FontWeight.bold,
-                    color: widget.isFirstPlace
-                        ? Colors.amber.shade900
-                        : Colors.deepPurple,
+                    color: widget.isDarkMode ? Colors.white70 : Colors.black54,
                   ),
                 ),
               ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () => setState(() => _isLocked = !_isLocked),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                _isLocked ? Icons.lock : Icons.lock_open,
+                size: 14,
+                color: _isLocked ? Colors.orange : Colors.blueGrey,
+              ),
             ),
           ),
           GestureDetector(
@@ -237,11 +245,9 @@ class _CartelaCardState extends State<CartelaCard>
             child: Padding(
               padding: const EdgeInsets.all(4),
               child: Icon(
-                Icons.delete,
-                size: 16,
-                color: widget.isFirstPlace
-                    ? Colors.amber.shade900
-                    : Colors.deepPurple,
+                Icons.close,
+                size: 18,
+                color: Colors.red,
               ),
             ),
           ),
@@ -253,9 +259,7 @@ class _CartelaCardState extends State<CartelaCard>
               child: Icon(
                 Icons.refresh,
                 size: 14,
-                color: widget.isFirstPlace
-                    ? Colors.amber.shade900
-                    : Colors.deepPurple,
+                color: Colors.blueGrey,
               ),
             ),
           ),
@@ -265,21 +269,32 @@ class _CartelaCardState extends State<CartelaCard>
   }
 
   Widget _buildColumnLabels() {
+    final double tileHeight = widget.isInLandscape ? 22 : 26;
+    final double spacing = widget.isInLandscape ? 1 : 4;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: 2),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: ['B', 'I', 'N', 'G', 'O'].map((label) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: widget.isInLandscape ? 12 : 14,
-                fontWeight: FontWeight.bold,
-                color: widget.isFirstPlace
-                    ? Colors.amber.shade900
-                    : Colors.deepPurple,
+          return Expanded(
+            child: Container(
+              height: tileHeight,
+              margin: EdgeInsets.symmetric(horizontal: spacing / 2),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(
+                  color: const Color(0xFFFFD700),
+                  width: 2,
+                ),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: widget.isInLandscape ? 11 : 13,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF1565C0),
+                ),
               ),
             ),
           );
@@ -292,6 +307,7 @@ class _CartelaCardState extends State<CartelaCard>
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 5,
         crossAxisSpacing: widget.isInLandscape ? 1 : 4,
@@ -303,15 +319,21 @@ class _CartelaCardState extends State<CartelaCard>
         final String cellValue = _getCellValue(index);
         final bool isMarked = widget.cartela['marked']?[index] ?? false;
         final Color cellColor = (index == 12)
-            ? Colors.orange
+            ? const Color(0xFF2E7D32) // FREE always green
             : isMarked
-                ? Colors.orange
-                : Colors.white;
+                ? (widget.isDarkMode
+                    ? const Color(0xFFE53935) // dark: red
+                    : const Color(0xFF1565C0)) // light: blue
+                : (widget.isDarkMode
+                    ? const Color(0xFF1A1A1A) // dark: near-black
+                    : Colors.white);
         final bool isNeededOneAwayCell = oneAwayCellIndexes.contains(index);
         final Text cellText = Text(
           cellValue,
           style: TextStyle(
-            color: Colors.black,
+            color: (isMarked || index == 12)
+                ? Colors.white
+                : (widget.isDarkMode ? Colors.white70 : Colors.black87),
             fontWeight: FontWeight.bold,
             fontSize: widget.isInLandscape ? 14 : 17,
           ),
@@ -319,7 +341,7 @@ class _CartelaCardState extends State<CartelaCard>
 
         return GestureDetector(
           onTap: () {
-            if (index != 12 && cellValue.isNotEmpty) {
+            if (!_isLocked && !widget.masterLocked && index != 12 && cellValue.isNotEmpty) {
               final int columnIndex = index % 5;
               final String column = ['B', 'I', 'N', 'G', 'O'][columnIndex];
               final bool currentState =
@@ -355,11 +377,20 @@ class _CartelaCardState extends State<CartelaCard>
               : Container(
                   decoration: BoxDecoration(
                     color: cellColor,
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(
-                      color: Colors.deepPurpleAccent,
-                      width: 1,
-                    ),
+                    shape: (isMarked || index == 12)
+                        ? BoxShape.circle
+                        : BoxShape.rectangle,
+                    borderRadius: (isMarked || index == 12)
+                        ? null
+                        : BorderRadius.circular(7),
+                    border: (isMarked || index == 12)
+                        ? null
+                        : Border.all(
+                            color: widget.isDarkMode
+                                ? const Color(0xFF3A3A6E)
+                                : const Color(0xFF1565C0),
+                            width: 1.5,
+                          ),
                   ),
                   alignment: Alignment.center,
                   child: cellText,
@@ -422,7 +453,7 @@ class _CartelaCardState extends State<CartelaCard>
     final int columnIndex = index % 5;
     final int rowIndex = index ~/ 5;
 
-    if (columnIndex == 2 && rowIndex == 2) return "FREE";
+    if (columnIndex == 2 && rowIndex == 2) return "F";
 
     return widget.cartela[columns[columnIndex]]?[rowIndex]?.toString() ?? "";
   }

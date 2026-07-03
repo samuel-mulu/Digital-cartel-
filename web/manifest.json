@@ -1,11 +1,11 @@
 {
-    "name": "Friends Bingo",
-    "short_name": "Friends Bingo",
+    "name": "ግእዝ ቢንጎ",
+    "short_name": "ግእዝ ቢንጎ",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#311B92",
     "theme_color": "#311B92",
-    "description": "Friends Bingo — play bingo with friends.",
+    "description": "ግእዝ ቢንጎ — ብሓባር ተጻወቱ ",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

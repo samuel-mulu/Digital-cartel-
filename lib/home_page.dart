@@ -8,6 +8,7 @@ import 'app_i18n.dart';
 import 'app_version.dart';
 import 'cartela_card.dart';
 import 'game_rules.dart';
+import 'main.dart' show darkModeNotifier;
 
 class HomePage extends StatefulWidget {
   const HomePage({
@@ -28,11 +29,10 @@ class _HomePageState extends State<HomePage>
   static const String _sessionStorageKey = 'bingo_session_v1';
   Map<String, Map<String, List<dynamic>>> cartelas =
       {}; // Holds cartelas by unique numbers
-  bool isAutoRotate = true; // Track orientation state
   TextEditingController searchController =
       TextEditingController(); // Single search controller
   String searchAlert = ""; // Alert text for search result
-  String lastClickedNumber = ""; // Track the last clicked cell value
+  List<String> recentNumbers = []; // Track the last 3 marked/unmarked numbers
   bool lastActionWasAdded = true; // Track if last action was add or remove
   bool useLineCounting = false; // Toggle between sorting algorithms
   bool sortingDisabled = false; // Toggle to disable sorting completely
@@ -60,6 +60,8 @@ class _HomePageState extends State<HomePage>
   late AppLanguage _activeLanguage;
   String _gamePickerSearchQuery = '';
   final Set<String> _calledNumberKeys = <String>{};
+  Map<String, dynamic>? _cartelasJsonCache;
+  bool _masterLocked = false;
   AppI18n get i18n => AppI18n(_activeLanguage);
 
   bool _matchesGamePickerSearch(int catalogIndex, String gameName) {
@@ -167,7 +169,7 @@ class _HomePageState extends State<HomePage>
       final prefs = await SharedPreferences.getInstance();
       final session = <String, dynamic>{
         'cartelas': cartelas,
-        'lastClickedNumber': lastClickedNumber,
+        'recentNumbers': recentNumbers,
         'lastActionWasAdded': lastActionWasAdded,
         'useLineCounting': useLineCounting,
         'sortingDisabled': sortingDisabled,
@@ -220,9 +222,10 @@ class _HomePageState extends State<HomePage>
         return;
       }
 
-      final String response =
-          await rootBundle.loadString('assets/cartelas.json');
-      final Map<String, dynamic> jsonData = json.decode(response);
+      _cartelasJsonCache ??=
+          json.decode(await rootBundle.loadString('assets/cartelas.json'))
+              as Map<String, dynamic>;
+      final Map<String, dynamic> jsonData = _cartelasJsonCache!;
 
       final restoredCartelas = <String, Map<String, List<dynamic>>>{};
       final rawCartelas = decoded['cartelas'];
@@ -258,8 +261,13 @@ class _HomePageState extends State<HomePage>
       if (!mounted) return;
       setState(() {
         cartelas = restoredCartelas;
-        lastClickedNumber =
-            (decoded['lastClickedNumber'] as String?) ?? lastClickedNumber;
+        final savedRecent = decoded['recentNumbers'];
+        if (savedRecent is List) {
+          recentNumbers = savedRecent.cast<String>();
+        } else {
+          final legacy = decoded['lastClickedNumber'] as String?;
+          recentNumbers = (legacy != null && legacy.isNotEmpty) ? [legacy] : [];
+        }
         lastActionWasAdded =
             (decoded['lastActionWasAdded'] as bool?) ?? lastActionWasAdded;
         useLineCounting = (decoded['useLineCounting'] as bool?) ?? useLineCounting;
@@ -356,10 +364,11 @@ class _HomePageState extends State<HomePage>
 
   Future<void> fetchCartela(String cartelaNumber) async {
     try {
-      // Load JSON data from the asset
-      final String response =
-          await rootBundle.loadString('assets/cartelas.json');
-      final Map<String, dynamic> jsonData = json.decode(response);
+      // Load JSON data from the asset (cached after first load)
+      _cartelasJsonCache ??=
+          json.decode(await rootBundle.loadString('assets/cartelas.json'))
+              as Map<String, dynamic>;
+      final Map<String, dynamic> jsonData = _cartelasJsonCache!;
 
       if (!mounted) return;
 
@@ -379,6 +388,7 @@ class _HomePageState extends State<HomePage>
           };
           _applyCalledNumbersToCartela(newCartela);
           cartelas[cartelaNumber] = newCartela;
+          sortCartelasByMarkedCount();
           searchAlert =
               "Cartela number $cartelaNumber loaded successfully."; // Success alert
         });
@@ -397,19 +407,6 @@ class _HomePageState extends State<HomePage>
             "Error fetching cartela data. Please try again."; // Error message
       });
     }
-  }
-
-  // Toggle orientation
-  void toggleOrientation() {
-    setState(() {
-      isAutoRotate = !isAutoRotate;
-      if (isAutoRotate) {
-        SystemChrome.setPreferredOrientations([]); // Enable auto-rotate
-      } else {
-        SystemChrome.setPreferredOrientations(
-            [DeviceOrientation.portraitUp]); // Portrait only
-      }
-    });
   }
 
   // Add cartela logic
@@ -491,6 +488,7 @@ class _HomePageState extends State<HomePage>
                 _calledNumberKeys.clear();
                 searchAlert =
                     "All marked numbers have been reset."; // Show message
+                sortCartelasByMarkedCount();
               });
               saveGameState();
             },
@@ -504,33 +502,25 @@ class _HomePageState extends State<HomePage>
   // Mark/Unmark the same number across all cartelas
   void markNumberAcrossAllCartelas(
       String column, String value, bool newMarkedState) {
+    final key = _calledKey(column, value);
+    final columnIndex = ['B', 'I', 'N', 'G', 'O'].indexOf(column);
     setState(() {
-      final key = _calledKey(column, value);
       if (newMarkedState) {
         _calledNumberKeys.add(key);
       } else {
         _calledNumberKeys.remove(key);
       }
-      cartelas.forEach((cartelaNumber, cartela) {
-        // Get the list for this column (B, I, N, G, or O)
-        List<dynamic>? columnList = cartela[column];
-        if (columnList != null) {
-          // Find if this value exists in the column
-          for (int rowIndex = 0; rowIndex < columnList.length; rowIndex++) {
-            if (columnList[rowIndex]?.toString() == value) {
-              // Calculate the cell index in the 25-cell grid
-              int columnIndex = ['B', 'I', 'N', 'G', 'O'].indexOf(column);
-              int cellIndex = rowIndex * 5 + columnIndex;
-              // Mark/unmark this cell
-              cartela['marked']?[cellIndex] = newMarkedState;
-            }
+      for (final cartela in cartelas.values) {
+        final columnList = cartela[column];
+        if (columnList == null) continue;
+        for (int rowIndex = 0; rowIndex < columnList.length; rowIndex++) {
+          if (columnList[rowIndex]?.toString() == value) {
+            cartela['marked']?[rowIndex * 5 + columnIndex] = newMarkedState;
           }
         }
-      });
-
-      // After marking, sort cartelas by marked count (most marked first)
-      sortCartelasByMarkedCount();
+      }
     });
+    sortCartelasByMarkedCount();
     _checkForBingoCelebration();
     saveGameState();
   }
@@ -588,228 +578,243 @@ class _HomePageState extends State<HomePage>
     await saveGameState();
   }
 
-  // Count completed bingo lines (rows, columns, diagonals, four corners)
-  int countCompletedLines(Map<String, List<dynamic>> cartela) {
-    int lines = 0;
-    List<bool> marked = List<bool>.from(cartela['marked']!);
+  // Sort mode enum: 0=by lines, 1=by lines no-free, 2=by count, 3=by count no-free, 4=by rectangle, 5=no sort
+  int _sortMode = 0;
 
-    // Helper function to check if a cell is effectively marked
-    bool isEffectivelyMarked(int index) {
-      // FREE space at N[2] (index 12) is always considered marked
-      if (index == 12) return true;
-      return marked[index];
-    }
-
-    // Check rows (5 possible)
-    for (int row = 0; row < 5; row++) {
-      bool rowComplete = true;
-      for (int col = 0; col < 5; col++) {
-        int index = row * 5 + col;
-        if (!isEffectivelyMarked(index)) {
-          rowComplete = false;
-          break;
-        }
-      }
-      if (rowComplete) lines++;
-    }
-
-    // Check columns (5 possible)
-    for (int col = 0; col < 5; col++) {
-      bool colComplete = true;
-      for (int row = 0; row < 5; row++) {
-        int index = row * 5 + col;
-        if (!isEffectivelyMarked(index)) {
-          colComplete = false;
-          break;
-        }
-      }
-      if (colComplete) lines++;
-    }
-
-    // Check main diagonal (top-left to bottom-right)
-    bool mainDiagComplete = true;
-    for (int i = 0; i < 5; i++) {
-      int index = i * 5 + i;
-      if (!isEffectivelyMarked(index)) {
-        mainDiagComplete = false;
-        break;
-      }
-    }
-    if (mainDiagComplete) lines++;
-
-    // Check anti-diagonal (top-right to bottom-left)
-    bool antiDiagComplete = true;
-    for (int i = 0; i < 5; i++) {
-      int index = i * 5 + (4 - i);
-      if (!isEffectivelyMarked(index)) {
-        antiDiagComplete = false;
-        break;
-      }
-    }
-    if (antiDiagComplete) lines++;
-
-    // Check four corners (B[0], B[4], O[0], O[4]) - unchanged as it doesn't include FREE space
-    if (marked[0] && marked[4] && marked[20] && marked[24]) {
-      lines++;
-    }
-
-    return lines;
+  void _applySortMode(int mode) {
+    setState(() {
+      _sortMode = mode;
+      sortingDisabled = false;
+      // 0 = by lines, 1 = by count; all others disabled
+      useLineCounting = (mode == 0);
+    });
+    sortCartelasByMarkedCount();
+    saveGameState();
   }
 
-  // Show settings dialog
+  // Show settings as a full-height right-side drawer
   void _showSettingsDialog() {
+    const sortOptions = [
+      (Icons.menu, Color(0xFFFFB300), 'ብመስመር ምስራዕ', true),
+      (Icons.format_list_numbered, Color(0xFF1A8FE3), 'ብበዝሒ ምስራዕ', true),
+      (Icons.menu, Color(0xFFFFB300), 'ብመስመር F-ዘይነካ', false),
+      (Icons.format_list_bulleted, Color(0xFF1A8FE3), 'ብ ስኴር', false),
+      (Icons.format_list_bulleted, Color(0xFF1A8FE3), 'ብ ስኴር F ዘይነካ', false),
+      (Icons.grid_view, Color(0xFF1A8FE3), 'ብ ሬክታንጓል', false),
+    ];
+    final pageCtx = context;
+
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(i18n.t('settings')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Sort toggle switch
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    i18n.t('sort_cards'),
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Switch(
-                    value: !sortingDisabled,
-                    onChanged: (value) {
-                      setState(() {
-                        sortingDisabled = !value;
-                      });
-                      setDialogState(
-                          () {}); // Rebuild dialog to show toggle change
-                      // Trigger resorting immediately when toggle changes
-                      if (!sortingDisabled) {
-                        sortCartelasByMarkedCount();
-                      }
-                      saveGameState();
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // Algorithm selection (only show when sorting is enabled)
-              if (!sortingDisabled) ...[
-                const SizedBox(height: 8),
-                DropdownButtonFormField<bool>(
-                  initialValue: useLineCounting,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: false,
-                      child: Text('ብ በዝሒ ዝተፀወዐ'),
-                    ),
-                    DropdownMenuItem(
-                      value: true,
-                      child: Text('ብ በዝሒ መስመር'),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    setState(() {
-                      useLineCounting = value!;
-                    });
-                    setDialogState(
-                        () {}); // Rebuild dialog to show dropdown change
-                    // Trigger resorting immediately when algorithm changes
-                    sortCartelasByMarkedCount();
-                    saveGameState();
-                  },
-                ),
-              ],
-              const SizedBox(height: 16),
-              DropdownButtonFormField<AppLanguage>(
-                initialValue: _activeLanguage,
-                decoration: InputDecoration(
-                  labelText: i18n.t('language'),
-                  border: const OutlineInputBorder(),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-                items: [
-                  DropdownMenuItem(
-                    value: AppLanguage.english,
-                    child: Text(i18n.t('english')),
-                  ),
-                  DropdownMenuItem(
-                    value: AppLanguage.amharic,
-                    child: Text(i18n.t('amharic')),
-                  ),
-                  DropdownMenuItem(
-                    value: AppLanguage.tigrinya,
-                    child: Text(i18n.t('tigrinya')),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null && value != _activeLanguage) {
-                    setState(() {
-                      _activeLanguage = value;
-                    });
-                    widget.onLanguageChanged(value);
-                    setDialogState(() {});
-                    saveGameState();
-                  }
-                },
-              ),
-              const SizedBox(height: 20),
-              Center(
-                child: Column(
-                  children: [
-                    Text(
-                      '${i18n.t('app_version')}: ${AppVersion.label}',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
+      barrierColor: Colors.black54,
+      builder: (dlg) => ValueListenableBuilder<bool>(
+        valueListenable: darkModeNotifier,
+        builder: (dlg, isDark, _) {
+          final Color bg = isDark
+              ? const Color(0xFF1E1E2E)
+              : Colors.white;
+          final Color textColor = isDark ? Colors.white : const Color(0xFF1A1A2E);
+          final Color subColor = isDark ? Colors.white70 : Colors.black54;
+          final Color dividerColor = isDark ? Colors.white24 : Colors.black12;
+          final Color checkboxBorder = isDark ? Colors.white54 : Colors.black38;
+          return StatefulBuilder(
+            builder: (dlg, set) {
+              return GestureDetector(
+                onTap: () => Navigator.pop(dlg),
+                behavior: HitTestBehavior.opaque,
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: GestureDetector(
+                    onTap: () {},
+                    child: SafeArea(
+                      child: Material(
+                        color: bg,
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(16),
+                        ),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: MediaQuery.of(dlg).size.width * 0.55,
+                            maxHeight: MediaQuery.of(dlg).size.height,
+                          ),
+                          child: SingleChildScrollView(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 12),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Sort options
+                                ...List.generate(sortOptions.length, (i) {
+                                  final o = sortOptions[i];
+                                  final sel = _sortMode == i;
+                                  return Opacity(
+                                    opacity: o.$4 ? 1.0 : 0.35,
+                                    child: InkWell(
+                                      onTap: o.$4
+                                          ? () {
+                                              set(() {});
+                                              _applySortMode(i);
+                                            }
+                                          : null,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 12),
+                                        child: Row(
+                                          children: [
+                                            Icon(o.$1,
+                                                color: o.$2, size: 20),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Text(o.$3,
+                                                  style: TextStyle(
+                                                    color: textColor,
+                                                    fontSize: 14,
+                                                    fontWeight: sel
+                                                        ? FontWeight.bold
+                                                        : FontWeight.normal,
+                                                  )),
+                                            ),
+                                            Container(
+                                              width: 20,
+                                              height: 20,
+                                              decoration: BoxDecoration(
+                                                border: Border.all(
+                                                    color: checkboxBorder,
+                                                    width: 1.5),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                                color: sel
+                                                    ? const Color(0xFF1A8FE3)
+                                                    : Colors.transparent,
+                                              ),
+                                              child: sel
+                                                  ? const Icon(Icons.check,
+                                                      color: Colors.white,
+                                                      size: 14)
+                                                  : null,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }),
+                                Divider(
+                                    color: dividerColor, height: 1),
+                                // Clear all cards
+                                _drawerAction(
+                                  Icons.delete_forever,
+                                  Colors.red,
+                                  'ኩሎም ካርዲ ኣውጣድ',
+                                  textColor,
+                                  () {
+                                    Navigator.pop(dlg);
+                                    setState(() {
+                                      cartelas.clear();
+                                      recentNumbers.clear();
+                                      _calledNumberKeys.clear();
+                                    });
+                                    clearSavedGameState();
+                                  },
+                                ),
+                                // Reset all marks
+                                _drawerAction(
+                                  Icons.refresh,
+                                  Colors.orange,
+                                  'Reset/ ሰርዝ',
+                                  textColor,
+                                  () {
+                                    Navigator.pop(dlg);
+                                    setState(() {
+                                      for (final c in cartelas.values) {
+                                        c['marked'] =
+                                            List<bool>.filled(25, false);
+                                      }
+                                      recentNumbers.clear();
+                                      _calledNumberKeys.clear();
+                                      sortCartelasByMarkedCount();
+                                    });
+                                    saveGameState();
+                                  },
+                                ),
+                                // Contact Me
+                                _drawerAction(
+                                  Icons.chat_bubble_outline,
+                                  Colors.amber,
+                                  'Contact Me',
+                                  textColor,
+                                  () {
+                                    Navigator.pop(dlg);
+                                    showDialog(
+                                      context: pageCtx,
+                                      builder: (d2) => AlertDialog(
+                                        backgroundColor: bg,
+                                        title: Text('Contact Me',
+                                            style: TextStyle(
+                                                color: textColor)),
+                                        content: Text(
+                                          '${AppVersion.developerPhone}\n© ${AppVersion.developerCredit}',
+                                          style: TextStyle(
+                                              color: subColor),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(d2),
+                                            child: const Text('OK',
+                                                style: TextStyle(
+                                                    color: Color(
+                                                        0xFF1A8FE3))),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(height: 4),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16),
+                                  child: Text(AppVersion.label,
+                                      style: TextStyle(
+                                          color: subColor,
+                                          fontSize: 11)),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      AppVersion.developerPhone,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '© ${AppVersion.developerCredit}',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(i18n.t('done')),
-            ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _drawerAction(
+      IconData icon, Color iconColor, String label, Color textColor,
+      VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 20),
+            const SizedBox(width: 12),
+            Text(label,
+                style: TextStyle(color: textColor, fontSize: 14)),
           ],
         ),
       ),
-    ).whenComplete(() {
-      if (mounted) {
-        setState(() => _gamePickerSearchQuery = '');
-      }
-    });
+    );
   }
 
   /// Home status card: Amharic label only (second line of bilingual catalog).
@@ -868,59 +873,6 @@ class _HomePageState extends State<HomePage>
     setModalState(() {});
   }
 
-  void _syncPatternCountForGame(String gameName) {
-    switch (gameName) {
-      case rectangleGameName:
-        selectedRectangleCount =
-            clampPatternCountForGame(gameName, selectedRectangleCount);
-      case rectanguleGameName:
-        selectedRectanguleCount =
-            clampPatternCountForGame(gameName, selectedRectanguleCount);
-      case columnsGameName:
-        selectedColumnsCount =
-            clampPatternCountForGame(gameName, selectedColumnsCount);
-      case rowsGameName:
-        selectedRowsCount =
-            clampPatternCountForGame(gameName, selectedRowsCount);
-      case diagonalGameName:
-        selectedDiagonalCount =
-            clampPatternCountForGame(gameName, selectedDiagonalCount);
-      case lineTouchesFreeGameName:
-        selectedLineTouchesFreeCount =
-            clampPatternCountForGame(gameName, selectedLineTouchesFreeCount);
-      case linesWithoutFreeGameName:
-        selectedLinesWithoutFreeCount =
-            clampPatternCountForGame(gameName, selectedLinesWithoutFreeCount);
-      case lineGameName:
-        selectedLineCount =
-            clampPatternCountForGame(gameName, selectedLineCount);
-      case triangleGameName:
-        selectedTriangleCount =
-            clampPatternCountForGame(gameName, selectedTriangleCount);
-      case triangle4x4GameName:
-        selectedTriangle4x4Count =
-            clampPatternCountForGame(gameName, selectedTriangle4x4Count);
-      case smallCrossGameName:
-        selectedSmallCrossCount =
-            clampPatternCountForGame(gameName, selectedSmallCrossCount);
-      case smallTGameName:
-        selectedSmallTCount =
-            clampPatternCountForGame(gameName, selectedSmallTCount);
-      case smallXGameName:
-        selectedSmallXCount =
-            clampPatternCountForGame(gameName, selectedSmallXCount);
-      case smallLShapeGameName:
-        selectedSmallLCount =
-            clampPatternCountForGame(gameName, selectedSmallLCount);
-      case smallHGameName:
-        selectedSmallHCount =
-            clampPatternCountForGame(gameName, selectedSmallHCount);
-      case smallOGameName:
-        selectedSmallOCount =
-            clampPatternCountForGame(gameName, selectedSmallOCount);
-    }
-  }
-
   int _selectedCountForGame(String gameName) {
     switch (gameName) {
       case rectangleGameName:
@@ -960,42 +912,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  void _setSelectedCountForGame(String gameName, int count) {
-    switch (gameName) {
-      case rectangleGameName:
-        selectedRectangleCount = count;
-      case rectanguleGameName:
-        selectedRectanguleCount = count;
-      case columnsGameName:
-        selectedColumnsCount = count;
-      case rowsGameName:
-        selectedRowsCount = count;
-      case diagonalGameName:
-        selectedDiagonalCount = count;
-      case lineTouchesFreeGameName:
-        selectedLineTouchesFreeCount = count;
-      case linesWithoutFreeGameName:
-        selectedLinesWithoutFreeCount = count;
-      case lineGameName:
-        selectedLineCount = count;
-      case triangleGameName:
-        selectedTriangleCount = count;
-      case triangle4x4GameName:
-        selectedTriangle4x4Count = count;
-      case smallCrossGameName:
-        selectedSmallCrossCount = count;
-      case smallTGameName:
-        selectedSmallTCount = count;
-      case smallXGameName:
-        selectedSmallXCount = count;
-      case smallLShapeGameName:
-        selectedSmallLCount = count;
-      case smallHGameName:
-        selectedSmallHCount = count;
-      case smallOGameName:
-        selectedSmallOCount = count;
-    }
-  }
 
   bool _isGamePickerAtDefaults() {
     return selectedGameRule.name == defaultGameRule.name &&
@@ -1053,40 +969,6 @@ class _HomePageState extends State<HomePage>
       Colors.deepPurple.withValues(alpha: 0.18);
   static final Color _gamePickerSelectedBorder =
       Colors.deepPurple.withValues(alpha: 0.85);
-
-  Widget _buildGameCountOptions(
-    String gameName,
-    StateSetter setModalState,
-  ) {
-    final allowedCounts = allowedPatternCountsForGame(gameName);
-    if (allowedCounts.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final label = i18n.gameDisplayName(gameName);
-    final selectedCount = _selectedCountForGame(gameName);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 4,
-        children: allowedCounts.map((count) {
-          return ChoiceChip(
-            label: Text('$count $label'),
-            selected: selectedCount == count,
-            onSelected: (_) {
-              if (selectedCount == count) return;
-              setState(() {
-                _setSelectedCountForGame(gameName, count);
-              });
-              _refreshGameSelection(setModalState);
-            },
-          );
-        }).toList(),
-      ),
-    );
-  }
 
   void _showGameSelectionModal() {
     setState(() => _gamePickerSearchQuery = '');
@@ -1755,43 +1637,56 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // Existing caller kept; game-rule sorting now selects the best cartela.
+  // Existing caller kept; full sort by selected algorithm.
   void sortCartelasByMarkedCount() {
     sortCartelasByGameType(activeGameRule);
   }
 
-  // Move only the best cartela for the selected game rule to first position.
+  // Sort all cartelas descending by either total marked cells or completed patterns.
   void sortCartelasByGameType(GameRule gameRule) {
     if (sortingDisabled || cartelas.length <= 1) {
       return; // No sorting if disabled or 0/1 card
     }
 
-    final bestCartelaKey = findBestCartelaKeyForGame(cartelas, gameRule);
+    final entries = cartelas.entries.toList();
 
-    // If we found a best card and it's not already first
-    if (bestCartelaKey != null && cartelas.keys.first != bestCartelaKey) {
-      // Get all entries
-      var entries = cartelas.entries.toList();
-
-      // Find the index of the best card
-      int bestIndex =
-          entries.indexWhere((entry) => entry.key == bestCartelaKey);
-
-      if (bestIndex > 0) {
-        // Remove the best card from its position
-        var bestEntry = entries.removeAt(bestIndex);
-
-        // Insert it at the beginning
-        entries.insert(0, bestEntry);
-
-        // Rebuild the map with new order
-        cartelas = Map.fromEntries(entries);
-      }
+    // Preserve original order for equal scores (stable tie-breaker).
+    final originalIndex = <String, int>{};
+    for (int i = 0; i < entries.length; i++) {
+      originalIndex[entries[i].key] = i;
     }
+
+    entries.sort((a, b) {
+      final int scoreA;
+      final int scoreB;
+      if (useLineCounting) {
+        // "By lines" always counts standard bingo lines: rows + columns + diagonals.
+        scoreA = countCompletedPatternsForGame(a.value, lineGameRule);
+        scoreB = countCompletedPatternsForGame(b.value, lineGameRule);
+      } else {
+        scoreA = countMarkedCellsForCartela(a.value);
+        scoreB = countMarkedCellsForCartela(b.value);
+      }
+
+      if (scoreA != scoreB) {
+        return scoreB.compareTo(scoreA); // Descending.
+      }
+      // Keep original order for ties.
+      return originalIndex[a.key]!.compareTo(originalIndex[b.key]!);
+    });
+
+    cartelas = Map.fromEntries(entries);
   }
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: darkModeNotifier,
+      builder: (context, isDark, _) => _buildPage(context),
+    );
+  }
+
+  Widget _buildPage(BuildContext context) {
     // Get screen dimensions for responsive design
     double screenWidth = MediaQuery.of(context).size.width;
     bool isInLandscape =
@@ -1806,6 +1701,8 @@ class _HomePageState extends State<HomePage>
     final GameRule currentGameRule = activeGameRule;
 
     return Scaffold(
+      backgroundColor:
+          darkModeNotifier.value ? Colors.black : Colors.grey.shade100,
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(appBarHeight),
         child: AppBar(
@@ -1830,8 +1727,36 @@ class _HomePageState extends State<HomePage>
               ),
             ],
           ),
-          backgroundColor: Colors.deepPurple,
+          backgroundColor: darkModeNotifier.value
+              ? const Color(0xFF1A1A2E)
+              : const Color(0xFF1A8FE3),
           actions: [
+            // Master lock/unlock all cards
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: GestureDetector(
+                onTap: () => setState(() => _masterLocked = !_masterLocked),
+                child: Icon(
+                  _masterLocked ? Icons.lock : Icons.lock_open,
+                  color: _masterLocked ? Colors.orange : Colors.white,
+                  size: iconSize,
+                ),
+              ),
+            ),
+            // Dark/light mode toggle
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: GestureDetector(
+                onTap: () {
+                  darkModeNotifier.value = !darkModeNotifier.value;
+                },
+                child: Icon(
+                  darkModeNotifier.value ? Icons.light_mode : Icons.dark_mode,
+                  color: Colors.white,
+                  size: iconSize,
+                ),
+              ),
+            ),
             // Game type menu
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1839,43 +1764,19 @@ class _HomePageState extends State<HomePage>
                 onTap: _showGameSelectionModal,
                 child: Icon(
                   Icons.menu,
-                  color: Colors.red,
+                  color: Colors.white,
                   size: iconSize,
                 ),
               ),
             ),
-            // Delete/Restore icon
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: GestureDetector(
-                onTap: restoreCartelas,
-                child: Icon(
-                  cartelas.isEmpty ? Icons.restore : Icons.delete,
-                  color: Colors.red,
-                  size: iconSize,
-                ),
-              ),
-            ),
-            // Refresh icon
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: GestureDetector(
-                onTap: resetMarkedNumbers,
-                child: Icon(
-                  Icons.refresh,
-                  color: Colors.red,
-                  size: iconSize,
-                ),
-              ),
-            ),
-            // 3-dot menu for settings (moved to last position)
+            // 3-dot settings menu
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: GestureDetector(
                 onTap: _showSettingsDialog,
                 child: Icon(
                   Icons.more_vert,
-                  color: Colors.red,
+                  color: Colors.white,
                   size: iconSize,
                 ),
               ),
@@ -1903,7 +1804,7 @@ class _HomePageState extends State<HomePage>
                             vertical: 8,
                           ),
                     decoration: BoxDecoration(
-                      color: Colors.deepPurple,
+                      color: const Color(0xFF1A8FE3),
                             borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
@@ -1917,22 +1818,26 @@ class _HomePageState extends State<HomePage>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildAdaptiveWrapText(
-                                '${cartelas.length} ${i18n.t('cards')}',
+                                currentGameRule.name == 'Manual'
+                                    ? '${cartelas.length} ካርቴላ'
+                                    : '${cartelas.length} ${i18n.t('cards')}',
                                 baseFontSize: screenWidth < 360 ? 13 : 15,
                                 minFontSize: 11,
                                 maxLines: 2,
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
-                              const SizedBox(height: 6),
-                              _buildAdaptiveWrapText(
-                                _activeGameDisplayName(),
-                                baseFontSize: screenWidth < 360 ? 11 : 13,
-                                minFontSize: 9,
-                                maxLines: 6,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              if (currentGameRule.name != 'Manual') ...[
+                                const SizedBox(height: 6),
+                                _buildAdaptiveWrapText(
+                                  _activeGameDisplayName(),
+                                  baseFontSize: screenWidth < 360 ? 11 : 13,
+                                  minFontSize: 9,
+                                  maxLines: 6,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -1940,60 +1845,55 @@ class _HomePageState extends State<HomePage>
 
                       const SizedBox(width: 10),
 
-                  // Right side: Last clicked number with label
-                  if (lastClickedNumber.isNotEmpty)
-                        Flexible(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            mainAxisSize: MainAxisSize.min,
-                      children: [
-                              Flexible(
-                                child: Text(
-                                  '${lastActionWasAdded ? i18n.t('added') : i18n.t('removed')}: ',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                                    color: lastActionWasAdded
-                                        ? Colors.black
-                                        : Colors.red,
-                            fontSize: screenWidth < 360 ? 12 : 14,
-                            fontWeight: FontWeight.bold,
-                                  ),
-                          ),
-                        ),
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.deepPurple,
-                            boxShadow: [
-                              BoxShadow(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.3),
-                                offset: const Offset(2, 2),
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                          child: Center(
+                  // Right side: Last 3 marked numbers as colored circles
+                  if (recentNumbers.isNotEmpty)
+                    Flexible(
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: recentNumbers.indexed.map((e) {
+                          final int idx = e.$1;
+                          final String n = e.$2;
+                          final double ballSize =
+                              screenWidth < 360 ? 34 : 40;
+                          // Newest ball (idx 0) reflects add/remove action color
+                          final bool isNewest = idx == 0;
+                          final Color ballColor = isNewest && !lastActionWasAdded
+                              ? const Color(0xFFE53935) // red = removed
+                              : const Color(0xFF1A8FE3); // blue = added
+                          final Color shadowColor = isNewest && !lastActionWasAdded
+                              ? const Color(0x44E53935)
+                              : const Color(0x441A8FE3);
+                          return Container(
+                            width: ballSize,
+                            height: ballSize,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: ballColor,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: shadowColor,
+                                  offset: const Offset(2, 2),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            alignment: Alignment.center,
                             child: Text(
-                              lastClickedNumber,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                              n,
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: screenWidth < 360 ? 12 : 14,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                          ),
-                        ),
-                      ],
-                          ),
+                          );
+                        }).toList(),
+                      ),
                     )
                   else
-                        const SizedBox(width: 48),
+                    const SizedBox(width: 48),
                 ],
               ),
             ),
@@ -2021,7 +1921,11 @@ class _HomePageState extends State<HomePage>
                             final gameResult = evaluateCartelaForGame(
                               entry.value,
                               currentGameRule,
-                              includeOneAway: false,
+                              includeOneAway: true,
+                            );
+                            final int lineCount = countCompletedPatternsForGame(
+                              entry.value,
+                              lineGameRule,
                             );
                             // Gold highlight only when the top cartela has bingo.
                             final bool isFirstPlace =
@@ -2030,26 +1934,19 @@ class _HomePageState extends State<HomePage>
                         return Container(
                               key: ValueKey(entry.key),
                           margin: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: isFirstPlace
-                                  ? Colors.amber
-                                  : Colors.deepPurpleAccent,
-                              width: isFirstPlace ? 3 : 1,
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: isFirstPlace
-                                ? [
+                          decoration: isFirstPlace
+                              ? BoxDecoration(
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: [
                                     BoxShadow(
-                                          color: Colors.amber
-                                              .withValues(alpha: 0.6),
+                                      color: Colors.amber.withValues(alpha: 0.6),
                                       spreadRadius: 2,
                                       blurRadius: 8,
                                       offset: const Offset(0, 0),
                                     ),
-                                  ]
-                                : null,
-                          ),
+                                  ],
+                                )
+                              : null,
                               child: CartelaCard(
                                 cartelaNumber: entry.key,
                                 cartela: entry.value,
@@ -2059,9 +1956,14 @@ class _HomePageState extends State<HomePage>
                                 screenWidth: screenWidth,
                                 selectedGameRule: currentGameRule,
                                 language: _activeLanguage,
+                                isDarkMode: darkModeNotifier.value,
+                                lineCount: lineCount,
+                                gameResult: gameResult,
+                                masterLocked: _masterLocked,
                                 onRemove: () {
                                   setState(() {
                                     cartelas.remove(entry.key);
+                                    sortCartelasByMarkedCount();
                                   });
                                   _checkForBingoCelebration();
                                 },
@@ -2069,13 +1971,17 @@ class _HomePageState extends State<HomePage>
                                   setState(() {
                                     entry.value['marked'] = List<bool>.generate(
                                         25, (index) => false);
+                                    sortCartelasByMarkedCount();
                                   });
                                   _checkForBingoCelebration();
                                 },
                                 onCellMarkChanged: (column, value, newState) {
                                   setState(() {
-                                    lastClickedNumber = value;
                                     lastActionWasAdded = newState;
+                                    recentNumbers = [
+                                      value,
+                                      ...recentNumbers.where((n) => n != value),
+                                    ].take(3).toList();
                                   });
                                   markNumberAcrossAllCartelas(
                                       column, value, newState);
@@ -2130,8 +2036,8 @@ class _HomePageState extends State<HomePage>
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddCartelaDialog,
-        backgroundColor: Colors.deepPurple,
-        child: const Icon(Icons.add),
+        backgroundColor: const Color(0xFF1A8FE3),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }

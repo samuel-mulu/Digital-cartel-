@@ -2792,6 +2792,37 @@ List<WinPattern> selectWinningPatternsForDisplay(
   return [completed.first];
 }
 
+/// Counts all cells marked on a cartela (index 12 FREE is always counted).
+int countMarkedCellsForCartela(Map<String, List<dynamic>> cartela) {
+  final marked = List<bool>.from(
+    cartela['marked'] ?? List<bool>.generate(25, (index) => false),
+  );
+  var count = 0;
+  for (int index = 0; index < marked.length; index++) {
+    if (_isCellMarkedForGame(index, marked)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/// Counts all fully completed patterns for the selected game rule.
+int countCompletedPatternsForGame(
+  Map<String, List<dynamic>> cartela,
+  GameRule gameRule,
+) {
+  final marked = List<bool>.from(
+    cartela['marked'] ?? List<bool>.generate(25, (index) => false),
+  );
+  return gameRule.patterns
+      .where(
+        (pattern) => pattern.cellIndexes.every(
+          (index) => _isCellMarkedForGame(index, marked),
+        ),
+      )
+      .length;
+}
+
 List<WinPattern> _selectCompletedCountedPatterns(
   GameRule gameRule,
   List<bool> marked,

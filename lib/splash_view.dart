@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'app_i18n.dart';
 
 /// Full-screen splash that scales on every device (no cropped PNG).
-class FriendsBingoSplashView extends StatelessWidget {
-  const FriendsBingoSplashView({
+class GeezBingoSplashView extends StatelessWidget {
+  const GeezBingoSplashView({
     super.key,
     required this.language,
     this.showLoader = true,
@@ -42,17 +42,6 @@ class FriendsBingoSplashView extends StatelessWidget {
               child: Column(
                 children: [
                   const Spacer(flex: 2),
-                  Image.asset(
-                    'assets/images/logo.webp',
-                    height: (size.height * 0.14).clamp(72.0, 120.0),
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Icon(
-                      Icons.casino,
-                      size: 80,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 28),
                   Text(
                     i18n.t('app_name'),
                     textAlign: TextAlign.center,
@@ -75,9 +64,9 @@ class FriendsBingoSplashView extends StatelessWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 36),
+                  const _AnimatedBingoBalls(),
                   const SizedBox(height: 20),
-                  const _BingoLetterBalls(),
-                  const SizedBox(height: 16),
                   Text(
                     i18n.t('splash_tagline'),
                     textAlign: TextAlign.center,
@@ -111,17 +100,53 @@ class FriendsBingoSplashView extends StatelessWidget {
   }
 }
 
-class _BingoLetterBalls extends StatelessWidget {
-  const _BingoLetterBalls();
+class _AnimatedBingoBalls extends StatefulWidget {
+  const _AnimatedBingoBalls();
+
+  @override
+  State<_AnimatedBingoBalls> createState() => _AnimatedBingoBallsState();
+}
+
+class _AnimatedBingoBallsState extends State<_AnimatedBingoBalls>
+    with TickerProviderStateMixin {
+  late final AnimationController _entranceController;
+  late final AnimationController _pulseController;
 
   static const List<String> _letters = ['B', 'I', 'N', 'G', 'O'];
   static const List<Color> _ballColors = [
-    Color(0xFF1565C0),
-    Color(0xFFC62828),
-    Color(0xFFF5F5F5),
-    Color(0xFF2E7D32),
-    Color(0xFFF9A825),
+    Color(0xFF1565C0), // B — blue
+    Color(0xFFC62828), // I — red
+    Color(0xFFF5F5F5), // N — white
+    Color(0xFFFFD54F), // G — gold (ግእዝ highlight)
+    Color(0xFF2E7D32), // O — green
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..forward();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+
+    _entranceController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _pulseController.repeat(reverse: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _entranceController.dispose();
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -130,34 +155,85 @@ class _BingoLetterBalls extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: List.generate(_letters.length, (index) {
-          final isLightBall = index == 2;
+          final isG = index == 3;
+          final isLight = index == 2 || index == 3;
+          final start = 0.13 * index;
+          final end = (start + 0.55).clamp(0.0, 1.0);
+
+          final scaleAnim = CurvedAnimation(
+            parent: _entranceController,
+            curve: Interval(start, end, curve: Curves.elasticOut),
+          );
+          final fadeAnim = CurvedAnimation(
+            parent: _entranceController,
+            curve: Interval(
+              start,
+              (start + 0.28).clamp(0.0, 1.0),
+              curve: Curves.easeIn,
+            ),
+          );
+
           return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _ballColors[index],
-                border: Border.all(
-                  color: isLightBall ? Colors.grey.shade400 : Colors.white24,
-                  width: 2,
-                ),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x55000000),
-                    blurRadius: 8,
-                    offset: Offset(0, 3),
+            padding: EdgeInsets.symmetric(horizontal: isG ? 8 : 5),
+            child: AnimatedBuilder(
+              animation: isG
+                  ? Listenable.merge([_entranceController, _pulseController])
+                  : _entranceController,
+              builder: (context, child) {
+                final pulse =
+                    isG ? 1.0 + (_pulseController.value * 0.08) : 1.0;
+                return Opacity(
+                  opacity: fadeAnim.value.clamp(0.0, 1.0),
+                  child: Transform.scale(
+                    scale: scaleAnim.value * pulse,
+                    child: child,
                   ),
-                ],
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _letters[index],
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: isLightBall ? Colors.black87 : Colors.white,
+                );
+              },
+              child: Container(
+                width: isG ? 62 : 46,
+                height: isG ? 62 : 46,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _ballColors[index],
+                  border: Border.all(
+                    color: isG
+                        ? const Color(0xFFFF8F00)
+                        : (isLight
+                            ? Colors.grey.shade400
+                            : Colors.white24),
+                    width: isG ? 3.5 : 2,
+                  ),
+                  boxShadow: isG
+                      ? const [
+                          BoxShadow(
+                            color: Color(0xAAFFD54F),
+                            blurRadius: 18,
+                            spreadRadius: 3,
+                            offset: Offset(0, 2),
+                          ),
+                          BoxShadow(
+                            color: Color(0x55000000),
+                            blurRadius: 8,
+                            offset: Offset(0, 3),
+                          ),
+                        ]
+                      : const [
+                          BoxShadow(
+                            color: Color(0x55000000),
+                            blurRadius: 8,
+                            offset: Offset(0, 3),
+                          ),
+                        ],
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _letters[index],
+                  style: TextStyle(
+                    fontSize: isG ? 26 : 22,
+                    fontWeight: FontWeight.bold,
+                    color: isLight ? Colors.black87 : Colors.white,
+                  ),
                 ),
               ),
             ),

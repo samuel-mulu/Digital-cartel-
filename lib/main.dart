@@ -5,6 +5,9 @@ import 'app_i18n.dart';
 import 'home_page.dart';
 import 'splash_view.dart';
 
+// Global notifier — readable/writable from anywhere without prop-drilling.
+final ValueNotifier<bool> darkModeNotifier = ValueNotifier<bool>(false);
+
 void main() {
   runApp(const MyApp());
 }
@@ -23,15 +26,31 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    _loadSavedLanguage();
+    _loadSavedPrefs();
+    darkModeNotifier.addListener(_onDarkModeChanged);
   }
 
-  Future<void> _loadSavedLanguage() async {
+  @override
+  void dispose() {
+    darkModeNotifier.removeListener(_onDarkModeChanged);
+    super.dispose();
+  }
+
+  void _onDarkModeChanged() {
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool('dark_mode', darkModeNotifier.value);
+    });
+    setState(() {}); // rebuild MaterialApp to update themeMode
+  }
+
+  Future<void> _loadSavedPrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance()
           .timeout(const Duration(seconds: 2));
       final saved = prefs.getString('app_language');
+      final savedDark = prefs.getBool('dark_mode') ?? false;
       if (!mounted) return;
+      darkModeNotifier.value = savedDark;
       setState(() {
         _language = _languageFromCode(saved);
         _languageLoaded = true;
@@ -84,7 +103,7 @@ class _MyAppState extends State<MyApp> {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
         home: Scaffold(
-          body: FriendsBingoSplashView(
+          body: GeezBingoSplashView(
             language: _language,
             showLoader: true,
           ),
@@ -95,9 +114,22 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: i18n.t('app_name'),
+      themeMode: darkModeNotifier.value ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
+      ),
+      darkTheme: ThemeData(
+        brightness: Brightness.dark,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.deepPurple,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+        scaffoldBackgroundColor: Colors.black,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF1A1A2E),
+        ),
       ),
       home: SplashScreen(
         language: _language,
@@ -146,7 +178,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FriendsBingoSplashView(
+      body: GeezBingoSplashView(
         language: widget.language,
         showLoader: true,
       ),
